@@ -1,0 +1,241 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Cattle Chat</title>
+
+  <!-- Marked (Markdown -> HTML) and DOMPurify (sanitize) via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#f6f8fa; --panel:#ffffff; --accent:#1a73e8; --muted:#6b7280;
+      --user-bg: #e8f0fe; --bot-bg:#fff; --max-w:720px;
+    }
+    body{background:var(--bg); font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; padding:24px; display:flex; justify-content:center;}
+    .app{width:100%; max-width:var(--max-w);}
+    header{display:flex; align-items:center; gap:12px; margin-bottom:16px;}
+    header h1{font-size:1.1rem; margin:0;}
+    .panel{background:var(--panel); border-radius:12px; box-shadow:0 6px 18px rgba(20,20,30,0.06); padding:16px;}
+    #log{min-height:240px; max-height:64vh; overflow:auto; padding:8px; scroll-behavior:smooth;}
+    .row{display:flex; gap:10px; margin:10px 0; align-items:flex-start;}
+    .user{justify-content:flex-end;}
+    .bubble{
+      padding:12px 14px; border-radius:12px; max-width:78%;
+      line-height:1.45; white-space:pre-wrap; font-size:0.95rem;
+      box-shadow:0 1px 0 rgba(16,24,40,0.03);
+    }
+    .bubble.bot{background:var(--bot-bg); color:#111;}
+    .bubble.user{background:var(--user-bg); color:#042; margin-left:auto;}
+    .meta{font-size:0.78rem; color:var(--muted); margin-top:6px;}
+    .controls{display:flex; gap:8px; margin-top:12px; align-items:center;}
+    #input{flex:1; min-width:0; padding:10px 12px; border-radius:8px; border:1px solid #e6e9ef; font-size:0.95rem;}
+    button{background:var(--accent); color:white; border:0; border-radius:8px; padding:10px 12px; cursor:pointer;}
+    button.secondary{background:#fff; color:#222; border:1px solid #e6e9ef;}
+    .small-btn{padding:6px 8px; font-size:0.85rem; border-radius:6px;}
+    .tools{display:flex; gap:8px; margin-left:8px;}
+    .bot-actions{display:flex; gap:8px; margin-top:6px;}
+    .score{font-size:0.8rem; color:var(--muted); margin-left:8px;}
+    .spinner{display:inline-block; width:18px; height:18px; border-radius:50%; border:3px solid rgba(0,0,0,0.08); border-top-color:var(--accent); animation: spin 1s linear infinite; margin-right:6px;}
+    @keyframes spin {to {transform: rotate(360deg);} }
+    .collapse{font-size:0.85rem; color:var(--muted); cursor:pointer; text-decoration:underline;}
+    .bot-tools{display:flex; gap:6px; margin-top:6px;}
+    .timestamp{font-size:0.75rem; color:var(--muted); margin-left:8px;}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <img src="https://img.icons8.com/fluency-systems-filled/24/000000/cow.png" alt="cow"/>
+      <h1>Cattle Chat — ask about cows, milk, feed, health</h1>
+    </header>
+
+    <div class="panel">
+      <div id="log"></div>
+
+      <div class="controls" style="margin-top:12px;">
+        <input id="input" placeholder="Ask about cattle (nutrition, mastitis, milk yield, housing)..." />
+        <button id="send">Send</button>
+        <div class="tools">
+          <button id="clear" class="secondary small-btn">Clear</button>
+          <button id="example" class="secondary small-btn">Example Q</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px; color:var(--muted); font-size:0.85rem;">
+        Tip: The assistant responds in Markdown. Use short, cattle-focused questions for best results.
+      </div>
+    </div>
+  </div>
+
+<script>
+  const log = document.getElementById('log');
+  const input = document.getElementById('input');
+  const send = document.getElementById('send');
+  const clearBtn = document.getElementById('clear');
+  const exampleBtn = document.getElementById('example');
+
+  function formatTime() {
+    const d = new Date();
+    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+
+  function appendUser(text) {
+    const row = document.createElement('div');
+    row.className = 'row user';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble user';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = formatTime();
+    row.appendChild(meta);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function appendBotElement(markdownHTML, score) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble bot';
+    bubble.innerHTML = markdownHTML;
+    container.appendChild(bubble);
+
+    // actions: copy / collapse / score
+    const actions = document.createElement('div');
+    actions.className = 'bot-actions';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'small-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(bubble.innerText || bubble.textContent);
+      copyBtn.textContent = 'Copied';
+      setTimeout(()=> copyBtn.textContent = 'Copy', 1500);
+    };
+    actions.appendChild(copyBtn);
+
+    const collapseBtn = document.createElement('span');
+    collapseBtn.className = 'collapse';
+    collapseBtn.textContent = 'Collapse';
+    collapseBtn.onclick = () => {
+      if (bubble.style.maxHeight) {
+        bubble.style.maxHeight = null;
+        collapseBtn.textContent = 'Collapse';
+      } else {
+        bubble.style.maxHeight = '84px';
+        bubble.style.overflow = 'hidden';
+        collapseBtn.textContent = 'Expand';
+      }
+    };
+    actions.appendChild(collapseBtn);
+
+    if (typeof score !== 'undefined' && score !== null) {
+      const scoreEl = document.createElement('div');
+      scoreEl.className = 'score';
+      scoreEl.textContent = 'Relevance: ' + (score).toFixed(2);
+      actions.appendChild(scoreEl);
+    }
+
+    container.appendChild(actions);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = formatTime();
+
+    row.appendChild(container);
+    row.appendChild(meta);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderMarkdownSafe(md) {
+    // convert to HTML then sanitize
+    try {
+      const raw = marked.parse(md || '');
+      const clean = DOMPurify.sanitize(raw, {ALLOWED_ATTR: ['href','target','rel']});
+      return clean;
+    } catch(e) {
+      return DOMPurify.sanitize(md);
+    }
+  }
+
+  async function sendQuery(text) {
+    appendUser(text);
+
+    // show interim bot "typing"
+    const typingRow = document.createElement('div');
+    typingRow.className = 'row';
+    const typingBubble = document.createElement('div');
+    typingBubble.className = 'bubble bot';
+    typingBubble.innerHTML = '<span class="spinner"></span> AI is typing…';
+    typingRow.appendChild(typingBubble);
+    log.appendChild(typingRow);
+    log.scrollTop = log.scrollHeight;
+
+    try {
+      const resp = await fetch('/cattle-chat/api/chat/', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({message: text})
+      });
+      const data = await resp.json();
+      // remove typing
+      typingRow.remove();
+
+      if (data.ok) {
+        // data.answer is Markdown text from the model
+        const html = renderMarkdownSafe(data.answer || '');
+        appendBotElement(html, data.score);
+      } else {
+        // non-cattle or error
+        const msg = data.message || data.error || 'Unknown error';
+        const html = renderMarkdownSafe('**' + msg + '**');
+        appendBotElement(html, data.score || null);
+      }
+
+    } catch(err) {
+      typingRow.remove();
+      const html = renderMarkdownSafe('**Network error.** ' + (err.message || err));
+      appendBotElement(html, null);
+    }
+  }
+
+  send.onclick = async () => {
+    const q = input.value.trim();
+    if (!q) return;
+    input.value = '';
+    await sendQuery(q);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send.click();
+    }
+  });
+
+  clearBtn.onclick = () => {
+    log.innerHTML = '';
+  };
+
+  exampleBtn.onclick = () => {
+    const ex = "What are 5 practical steps to increase milk production in a high-yielding cow?";
+    input.value = ex;
+    input.focus();
+  };
+
+  // optional: start with a sample message
+  (function welcome(){
+    const md = "## Welcome 👋\nAsk about cattle health, milk production, nutrition, infrastructure, or veterinary care. Try: *What are practical steps to increase milk production?*";
+    appendBotElement(renderMarkdownSafe(md), null);
+  })();
+</script>
+</body>
+</html>
