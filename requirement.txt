@@ -1,0 +1,8 @@
+Django>=4.2
+python-dotenv
+groq          # (install name depends on actual package; ensure you pip install the Groq SDK)
+sentence-transformers>=2.2.2
+torch               # sentence-transformers backend (use CPU wheel for deployment unless GPU available)
+# For streaming / channels:
+channels>=4.0
+channels_redis      # if you use Redis channel layer
